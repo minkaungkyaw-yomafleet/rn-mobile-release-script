@@ -3,6 +3,9 @@
 One CLI for React Native releases: Fastlane binary builds and RevoPush OTA updates. It replaces the per-repo
 `fastlane:*`, `*RevoPush` and clean scripts in `plus-mobile` and `better-mobile`.
 
+> Full setup, usage and troubleshooting docs live in the separate `rn-mobile-release-script-docs` repository, so they
+> are not part of the package developers install. This README is the short reference.
+
 - **Bun** runs the CLI (prompts, config, orchestration).
 - **Go** (`native/`, standard library only) does the I/O-heavy work: parallel cleaning, tool probing, Fastfile parsing.
   The two talk over JSON on stdout, and secret values never cross that boundary.
