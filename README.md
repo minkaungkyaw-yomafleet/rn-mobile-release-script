@@ -21,33 +21,62 @@ bun run check                  # bun tests + go vet + go tests
 With several Go installs, pick one explicitly: `GO=/opt/homebrew/bin/go bun run build:native:current`.
 
 `bun run build:native` cross-compiles macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`. The binaries are
-build artifacts (git-ignored), built and signed by CI and shipped inside the release tarball.
+build artifacts (git-ignored), built by CI and shipped inside the published npm package.
 
 ## Installing (for developers who use it)
 
-This package is internal and is **not published to npm** (`"private": true` blocks `npm publish`). Each release is a
-signed tarball on the GitHub Releases page. It already contains the compiled binaries, so **Go is not needed**; Bun is.
+`rnmrs` is published to the public npm registry. The package already contains the compiled binaries for macOS and Linux
+(arm64 and x64), so **Go is not needed**. **Bun 1.1 or newer is** (`rnmrs` runs under Bun); if it is missing, `rnmrs`
+says so and where to get it.
 
 ```bash
-gh release download v0.1.0 --repo <owner>/rn-mobile-release-script --pattern 'rn-mobile-release-script-*'
-shasum -a 256 -c rn-mobile-release-script-0.1.0.tgz.sha256
-cosign verify-blob \
-  --bundle rn-mobile-release-script-0.1.0.tgz.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/<owner>/rn-mobile-release-script/\.github/workflows/release\.yml@refs/tags/v' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  rn-mobile-release-script-0.1.0.tgz
-bun add -g ./rn-mobile-release-script-0.1.0.tgz   # puts `rnmrs` on your PATH
+npm install -g rnmrs      # or: bun add -g rnmrs
+rnmrs --cli-version
 ```
 
-The `cosign` step proves the tarball was built by this repository's release workflow and not altered afterwards.
-Replace `<owner>` with the GitHub org or user that owns the repository.
+To pin the version per project (recommended for teams, since the lockfile keeps everyone on the same one), install it
+as a dev dependency and run it through a script:
+
+```bash
+npm install -D rnmrs      # then add  "release": "rnmrs"  to the project's package.json scripts
+npm run release
+```
+
+**Verifying a release.** Every version is built by CI from a `v*` tag. The same tarball is attached to the
+GitHub Release for that tag, with a checksum and a cosign signature:
+
+```bash
+cosign verify-blob \
+  --bundle rnmrs-0.1.0.tgz.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/<owner>/rn-mobile-release-script/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  rnmrs-0.1.0.tgz
+```
+
+Replace `<owner>` with the GitHub account that owns the repository. Once the repository is public, npm also records a
+provenance attestation for each version; check it with `npm audit signatures`.
 
 ## Releasing a new version (maintainers)
 
 1. Bump `version` in `package.json` and merge to `main`.
 2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
 3. `.github/workflows/release.yml` verifies the tag matches `package.json`, runs `bun audit`, builds all four
-   binaries, runs the tests, packs one tarball, signs that exact file with keyless cosign, and creates the release.
+   binaries, runs the tests, packs a tarball, signs it with keyless cosign, creates the GitHub Release, and finally
+   publishes to npm.
+
+**Publishing to npm is permanent.** npm never lets a version number be reused, and a published version can only be
+withdrawn in narrow cases. Check the version and the changelog before you push the tag. Local `npm publish` is blocked
+on purpose (`prepublishOnly`); publish only through the workflow.
+
+**One-time setup:**
+
+- An npm account with two-factor authentication, and a repository secret named `NPM_TOKEN` holding an npm access token
+  that is allowed to publish `rnmrs`.
+- The first publish creates the package. After that, you can switch to npm trusted publishing (package Settings, Trusted
+  Publisher, GitHub Actions: this repository and `release.yml`), which needs npm 11.5.1 or newer and Node 22.14 or newer
+  in the workflow, and then delete the `NPM_TOKEN` secret so no long-lived token remains.
+- Provenance (a signed link from the npm package to the commit and workflow that built it) is added automatically
+  once the GitHub repository is public. npm only generates it for public repositories.
 
 `ci.yml` (tests on Linux and macOS, dependency audit) and `codeql.yml` (SAST for JS and Go) run on every PR; Dependabot
 keeps the SHA-pinned actions current. CodeQL on a private repository needs GitHub Advanced Security, and secret scanning

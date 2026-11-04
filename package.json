@@ -1,10 +1,22 @@
 {
-  "name": "rn-mobile-release-script",
+  "name": "rnmrs",
   "version": "0.1.0",
   "description": "Interactive release CLI for React Native apps: Fastlane binaries and RevoPush OTA updates",
+  "keywords": [
+    "react-native",
+    "release",
+    "fastlane",
+    "revopush",
+    "codepush",
+    "ota",
+    "cli"
+  ],
   "license": "UNLICENSED",
-  "private": true,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minkaungkyaw-yomafleet/rn-mobile-release-script.git"
+  },
   "bin": {
     "rnmrs": "bin/rnmrs.js"
   },
@@ -14,7 +26,11 @@
     "README.md"
   ],
   "engines": {
+    "node": ">=18",
     "bun": ">=1.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build:native": "bun scripts/build-native.js",
@@ -22,7 +38,8 @@
     "test": "bun test",
     "test:native": "cd native && go vet ./... && go test ./...",
     "check": "bun run test && bun run test:native",
-    "prepack": "bun run build:native"
+    "prepack": "bun run build:native",
+    "prepublishOnly": "node -e \"if(!process.env.CI){console.error('Publish from CI only: push a v* tag (see README).');process.exit(1)}\""
   },
   "dependencies": {
     "@inquirer/prompts": "^7.10.1",

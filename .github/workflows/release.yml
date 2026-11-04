@@ -1,8 +1,12 @@
 name: Release
 
 # Push a tag that matches package.json (for example v0.2.0). CI tests, builds the native binaries for
-# all four targets, packs ONE tarball, signs that exact file, and attaches it to a GitHub Release.
-# Nothing is published to a package registry.
+# all four targets, packs a tarball, signs it with cosign, attaches it to a GitHub Release, and
+# publishes the package to the public npm registry as `rnmrs`.
+#
+# Needs the repository secret NPM_TOKEN (a granular npm access token allowed to publish `rnmrs`).
+# npm provenance is added automatically once the GitHub repository is public; npm only generates it
+# for public source repositories.
 on:
   push:
     tags: ["v*"]
@@ -25,6 +29,10 @@ jobs:
         with:
           go-version: stable
           cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Tag must match package.json
@@ -48,7 +56,7 @@ jobs:
         run: |
           # --ignore-scripts: the binaries above are what gets packed, not a second rebuild.
           npm pack --ignore-scripts
-          tarball="rn-mobile-release-script-${VERSION}.tgz"
+          tarball="rnmrs-${VERSION}.tgz"
           test -f "${tarball}"
           # The tarball must contain all four binaries, or consumers on that platform get a broken CLI.
           for target in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
@@ -70,3 +78,19 @@ jobs:
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
             --verify-tag
+
+      # Last, because publishing to npm cannot be undone (a version number is never reused).
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          # --ignore-scripts: the binaries built above are what gets published, not a second rebuild.
+          flags="--access public --ignore-scripts"
+          if [ "${REPO_PRIVATE}" = "false" ]; then
+            flags="${flags} --provenance"
+          else
+            echo "Repository is private: publishing without provenance (npm only attests public repositories)."
+          fi
+          # shellcheck disable=SC2086 # flags is a deliberate word list
+          npm publish ${flags}
