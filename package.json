@@ -1,6 +1,6 @@
 {
   "name": "rnmrs",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Interactive release CLI for React Native apps: Fastlane binaries and RevoPush OTA updates",
   "keywords": [
     "react-native",
