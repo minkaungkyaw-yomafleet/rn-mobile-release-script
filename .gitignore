@@ -5,3 +5,5 @@ bin/native/
 .DS_Store
 .env
 .env.*
+# Output of a plain `go build` run inside native/
+/native/rnmrs-core

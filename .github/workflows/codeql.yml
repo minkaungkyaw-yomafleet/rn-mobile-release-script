@@ -21,15 +21,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript-typescript, go]
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          # Go does not support build-mode none: CodeQL must watch a real build.
+          - language: go
+            build-mode: manual
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.language == 'go'
+        with:
+          go-version: stable
+          cache: false
       - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           languages: ${{ matrix.language }}
-          build-mode: none
+          build-mode: ${{ matrix.build-mode }}
+      - name: Build the Go core
+        if: matrix.language == 'go'
+        working-directory: native
+        run: go build ./...
       - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           category: /language:${{ matrix.language }}
