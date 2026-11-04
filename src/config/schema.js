@@ -1,5 +1,6 @@
 import { isAbsolute, normalize } from 'node:path'
 import { ReleaseError } from '../lib/errors.js'
+import { collectCommands } from './commands.js'
 
 export const PLATFORMS = ['android', 'ios']
 
@@ -56,7 +57,23 @@ export function normalizeConfig(raw, source = 'rnmrs.config.yml') {
           if (!name) problems.push(`revopush.applications[${i}].name is required`)
           else if (applications.some((a) => a.name === name)) problems.push(`revopush.applications has two entries named "${name}"`)
           if (!PLATFORMS.includes(target)) problems.push(`revopush.applications[${i}].target must be one of ${PLATFORMS.join(', ')}`)
-          if (name && PLATFORMS.includes(target)) applications.push({ name, target })
+
+          // Which Xcode target holds the app version, per environment (iOS only). Keys are lower-cased.
+          const xcodeTargets = {}
+          const rawTargets = app?.xcode_targets
+          if (rawTargets !== undefined) {
+            if (target !== 'ios') {
+              problems.push(`revopush.applications[${i}].xcode_targets only applies to an application with target: ios`)
+            } else if (!isObject(rawTargets)) {
+              problems.push(`revopush.applications[${i}].xcode_targets must map environment names to Xcode target names`)
+            } else {
+              for (const [env, xcodeTarget] of Object.entries(rawTargets)) {
+                if (text(xcodeTarget)) xcodeTargets[env.toLowerCase()] = text(xcodeTarget)
+                else problems.push(`revopush.applications[${i}].xcode_targets.${env} must be a non-empty Xcode target name`)
+              }
+            }
+          }
+          if (name && PLATFORMS.includes(target)) applications.push({ name, target, xcodeTargets })
         })
       }
       if (section.environments !== undefined) {
@@ -75,8 +92,11 @@ export function normalizeConfig(raw, source = 'rnmrs.config.yml') {
     revopush = { applications, environments }
   }
 
-  const fastlaneRaw = raw.fastlane === undefined ? {} : raw.fastlane
-  const fastlane = { ios: { path: './ios' }, android: { path: './android' }, autoInitialize: true, lanes: {} }
+  // A section being present is what says the tool is configured (`fastlane:` with nothing under it
+  // still counts, and takes the defaults). Without it, binary releases are not offered.
+  const fastlaneRaw = raw.fastlane ?? {}
+  const fastlane = { enabled: raw.fastlane !== undefined, ios: { path: './ios' }, android: { path: './android' }, autoInitialize: true, lanes: {} }
+  if (!fastlane.enabled && !revopush) problems.push('configure at least one release tool: a revopush section, a fastlane section, or both')
   if (!isObject(fastlaneRaw)) {
     problems.push('fastlane must be a mapping')
   } else {
@@ -94,14 +114,24 @@ export function normalizeConfig(raw, source = 'rnmrs.config.yml') {
     if (fastlaneRaw.lanes !== undefined) collectLanes(fastlaneRaw.lanes, fastlane.lanes, problems)
   }
 
+  // Environments default to the env_files targets so a config without a revopush section still works for binaries.
+  const environments = revopush?.environments.length ? revopush.environments : envFiles.map((e) => titleCase(e.target))
+
+  // An xcode_targets key that names no environment would never be used, which hides a typo.
+  const known = environments.map((e) => e.toLowerCase())
+  for (const app of revopush?.applications ?? []) {
+    for (const env of Object.keys(app.xcodeTargets)) {
+      if (!known.includes(env)) problems.push(`revopush.applications "${app.name}": xcode_targets.${env} is not one of the environments (${environments.join(', ')})`)
+    }
+  }
+
+  const commands = collectCommands(raw.commands, { revopush, fastlaneEnabled: fastlane.enabled, environments }, problems)
+
   if (problems.length > 0) {
     throw new ReleaseError(`Invalid ${source}:`, { output: problems.map((p) => `- ${p}`).join('\n') })
   }
 
-  // Environments default to the env_files targets so a config without a revopush section still works for binaries.
-  const environments = revopush?.environments.length ? revopush.environments : envFiles.map((e) => titleCase(e.target))
-
-  return { projectName, envFiles, revopush, environments, fastlane }
+  return { projectName, envFiles, revopush, environments, fastlane, commands }
 }
 
 function collectLanes(raw, out, problems) {

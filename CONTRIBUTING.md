@@ -19,7 +19,7 @@ exit code 1. Secret values never cross that boundary: the Go result types have n
 | --- | --- |
 | `bin/rnmrs.js` | Entry point. Starts under Node or Bun and hands over to Bun if needed. |
 | `src/cli.js` | Flags, config loading, error handling. |
-| `src/config/` | Config schema, loader, template, `--init`. |
+| `src/config/` | Config schema, loader, template, `--init`, and shortcut commands (`commands.js`, `generate.js`). |
 | `src/prompts/` | Prompts and version rules. |
 | `src/fastlane/` | Lane classification and resolution, and the tie-break policy (`lanePolicy.js`). |
 | `src/pipeline/` | The three steps: checks, dependencies, release. |

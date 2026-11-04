@@ -39,9 +39,17 @@ npm run release
 Run these in the root of your React Native project:
 
 ```bash
-rnmrs --init       # asks first, then writes rnmrs.config.yml (never overwrites without an interactive yes)
+rnmrs --init       # asks what you release with, then writes rnmrs.config.yml
 rnmrs --dry-run    # runs the read-only checks and prints what would run, changing nothing
 rnmrs              # the real release, with guided prompts
+```
+
+`--init` asks **what you release with**: Fastlane (native app builds), RevoPush (over-the-air updates), or both. Press
+Space to tick a box and Enter to confirm. It pre-ticks what it finds in your project, and writes only the sections you
+chose. It never overwrites an existing file without an interactive yes. To skip the question, for example in a script:
+
+```bash
+rnmrs --init --yes --with revopush           # or: --with fastlane   or: --with fastlane,revopush
 ```
 
 Review the generated `rnmrs.config.yml` before the first release (see [Configuration](#configuration)).
@@ -58,12 +66,16 @@ Every prompt has a flag, and an answer you pass is not asked again.
 | `-a, --app <name>` | RevoPush application from the config. Also selects the platform. |
 | `-p, --platform <android\|ios>` | Platform, when no application is given. Needed for unattended `binary` releases. |
 | `-e, --env <environment>` | Environment from the config. Matching ignores case. |
-| `-v, --version <x.y.z>` | Exact version. RevoPush needs 2.0.0 or newer. Blank uses the version in the native project. |
+| `-v, --version <x.y.z>` | Release version, exact `x.y.z` with no minimum (`0.1.0` is fine). For RevoPush it is passed as `-t`. Blank uses the version in the native project. |
 | `-d, --description <text>` | Release description. Left out of the command when blank. |
 | `-y, --yes` | Answer confirmations with yes. Required for unattended releases. |
 | `--no-clean` | Skip cache and build-output cleanup. |
 | `--dry-run` | Run the read-only checks and print what would run. Exits 1 if a real run would fail. |
-| `--init` | Create `rnmrs.config.yml` after confirmation. |
+| `--init` | Create `rnmrs.config.yml` after confirmation. It asks what you release with. |
+| `--with <tools>` | With `--init`: the tools to configure (`fastlane`, `revopush`, or both separated by a comma), instead of asking. |
+| `--generate` | Add shortcut commands built from the apps and environments in your config. |
+| `--commands` | List the shortcut commands in the config. |
+| `<command>` | Run a shortcut command, for example `rnmrs revo_android_development`. See below. |
 | `-V, --cli-version` | Print the `rnmrs` version. |
 
 ```bash
@@ -72,6 +84,39 @@ rnmrs -t binary -p ios -e Qa --yes
 ```
 
 When `-t`, `-e` and either `-a` or `-p` are given, nothing else is prompted (version and description default to blank).
+
+### Shortcut commands
+
+For a release you do often, `rnmrs --generate` builds one-word commands from the apps and environments already in your
+config:
+
+```bash
+rnmrs --generate                    # shows what it will add, then asks
+rnmrs --commands                    # lists them
+rnmrs revo_android_development      # RevoPush, the android app, the Development environment
+```
+
+Names are small letters and underscores: `revo_<platform>_<environment>` for RevoPush and
+`fastlane_<platform>_<environment>` for Fastlane (with several RevoPush apps on one platform, the app name replaces the
+platform). A command fixes the release type, the application or platform, and the environment, so you are only asked for
+the **release version** and the **release description**, and both are optional (Enter skips, or pass `-v` and `-d`). With
+no terminal nothing is asked. Passing `-t`, `-a`, `-p` or `-e` together with a command is refused, because it would
+contradict it.
+
+`--generate` writes the `commands:` section of `rnmrs.config.yml`. It only adds: your comments stay, a command you wrote
+is never changed, and one you renamed is not added back under its old name. `--generate --dry-run` lists without writing,
+and `--yes` skips the confirmation. Run it again after you add an application or an environment. Each command is one line
+you can edit:
+
+```yaml
+commands:
+  revo_android_development: { type: revopush, app: my-app-android, env: Development }
+  fastlane_ios_qa: { type: binary, platform: ios, env: Qa }
+  hotfix: { type: revopush, app: my-app-ios, env: Production }   # your own
+```
+
+A `revopush` command gives the `app` (which sets the platform). A `binary` command gives the `platform`. `env` is one of
+your environments, in any letter case. A mistyped name suggests the nearest one.
 
 ### Unattended runs (CI)
 
@@ -94,7 +139,9 @@ secrets, never on the command line or in the config.
 
 ## Configuration
 
-`rnmrs --init` writes a commented template. The keys:
+`rnmrs --init` writes a commented template with the sections for the tools you chose. A section being present is what
+tells `rnmrs` that tool is set up: with only a `revopush` section there is no binary release type to choose, and with only
+a `fastlane` section there is no RevoPush one. A config needs at least one of them. The keys, with both:
 
 ```yaml
 project_name: "My App"
@@ -111,6 +158,9 @@ revopush:                        # optional; needed for -t revopush
       target: android
     - name: my-app-ios
       target: ios
+      xcode_targets:             # optional, iOS: the Xcode target that holds the app version
+        Development: MyAppDevelopment
+        Production: MyApp
   environments: [Development, Qa, Staging, Production]
 
 fastlane:
@@ -128,6 +178,21 @@ fastlane:
   a build that silently falls back to the wrong `.env` is the failure this tool exists to prevent.
 - Keep secrets out of this file. It holds names and paths only and is meant to be committed.
 
+### The iOS version of a RevoPush release
+
+An OTA update is delivered only to installed apps whose version matches the release's version. If you leave the version
+blank, `rnmrs` finds it in your Xcode project and passes it to RevoPush explicitly.
+
+An Xcode project can hold several targets with different versions: the app at `1.5.3`, for example, and notification or
+widget extensions still at `1.0.0`. RevoPush's own CLI does not know which one is your app, and can pick the wrong one,
+which publishes an update for an app version that does not exist. So when the targets disagree and nothing says which one
+is the app, `rnmrs` stops and lists them. Fix it either way:
+
+- set `xcode_targets` on the iOS application: for each environment, the Xcode target that holds the app version, or
+- pass the version yourself with `-v 1.5.3`.
+
+`xcode_targets` applies to iOS applications only. Android reads `versionName` from `build.gradle`.
+
 ### Fastlane lanes
 
 With `auto_initialize_commands: true`, `rnmrs` reads each Fastfile and works out the build and release lanes for the
@@ -144,7 +209,11 @@ candidates. Pin the lanes under `fastlane.lanes.<platform>.<environment>` to mak
 | `rnmrs needs Bun, which was not found on your PATH` | Install Bun from [bun.sh](https://bun.sh), then run `rnmrs` again. |
 | `<file> is missing` or `is empty` | Put the env file for that environment in the project. The release stops on purpose rather than build with the wrong one. |
 | `No env_files entry maps to "Production"` | Add `{ path: .env.production, target: production }` to `env_files`. |
+| `This project has no fastlane section` / `no revopush section` | That tool is not in `rnmrs.config.yml`. Add its section, or use the other release type. |
+| `Unknown command "x"` | The name is not in `commands:`. `rnmrs --commands` lists them, and a near miss is suggested. |
+| `The command x already sets the release type ...` | Remove `-t`, `-a`, `-p` or `-e`: a command already fixes them. |
 | `Several release lanes match ...` | Pin one under `fastlane.lanes` in `rnmrs.config.yml`. |
+| `The Xcode project has targets with different versions ...` | Set `xcode_targets` on the iOS application, or pass `-v <app version>`. See [the iOS version](#the-ios-version-of-a-revopush-release). |
 | `Not logged in to RevoPush` | Run `revopush login`, then retry. |
 | `This release needs a confirmation but the session is not interactive` | Add `--yes` if you intend an unattended release. |
 | `The native core binary is missing` | Install `rnmrs` from npm. A git checkout does not include the compiled helper. |

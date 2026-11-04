@@ -14,25 +14,42 @@ const needFlag = (what, flag) =>
  * When type, environment and an app or platform all come from flags, the run is treated as
  * fully specified (the CI / one-liner case): version and description are never prompted for.
  */
-export async function collectAnswers(config, flags, { interactive }) {
-  const fullySpecified = Boolean(flags.type && flags.env && (flags.app || flags.platform))
-  const mayPrompt = interactive && !fullySpecified
-
-  // 1. Release type
+export async function collectAnswers(config, flags, { interactive, askVersionAndDescription = false }) {
+  // 1. Release type: only what the config sets up is offered, and a single option needs no question.
+  const available = [...(config.fastlane.enabled ? ['binary'] : []), ...(config.revopush ? ['revopush'] : [])]
   let type = flags.type
+  if (type === 'binary' && !available.includes('binary')) {
+    throw new ReleaseError('This project has no fastlane section in rnmrs.config.yml.', {
+      hint: `Add a fastlane section (the ios and android paths)${available.includes('revopush') ? ', or use -t revopush' : ''}.`,
+    })
+  }
+  if (type === 'revopush' && !available.includes('revopush')) {
+    throw new ReleaseError('This project has no revopush section in rnmrs.config.yml.', {
+      hint: `Add revopush.applications and revopush.environments${available.includes('binary') ? ', or use -t binary' : ''}.`,
+    })
+  }
+  const onlyOne = !type && available.length === 1
+  if (onlyOne) {
+    type = available[0]
+    info(`Release type: ${type} (the only tool in rnmrs.config.yml)`)
+  }
   if (!type) {
     if (!interactive) throw needFlag('A release type', '-t revopush|binary')
     type = await select({
       message: 'Release type',
       choices: [
         { name: 'binary (Fastlane build + store/distribution release)', value: 'binary' },
-        ...(config.revopush ? [{ name: 'revopush (over-the-air JS update)', value: 'revopush' }] : []),
+        { name: 'revopush (over-the-air JS update)', value: 'revopush' },
       ],
     })
   }
-  if (type === 'revopush' && !config.revopush) {
-    throw new ReleaseError('This project has no revopush section in rnmrs.config.yml.', { hint: 'Add revopush.applications and revopush.environments, or use -t binary.' })
-  }
+
+  // When type, environment and an app or platform are all settled without asking, the run is fully
+  // specified (the CI / one-liner case): version and description are never prompted for.
+  // A shortcut command is fully specified too, but its version and description are still asked
+  // (both optional): they change every release, so they cannot live in the config.
+  const fullySpecified = Boolean((flags.type || onlyOne) && flags.env && (flags.app || flags.platform))
+  const mayPrompt = interactive && (askVersionAndDescription || !fullySpecified)
 
   // 2 + 3. Platform and target application
   let platform = flags.platform
@@ -81,12 +98,12 @@ export async function collectAnswers(config, flags, { interactive }) {
   // 5. Version (optional; validated whichever way it arrives)
   let version = ''
   if (flags.version !== undefined) {
-    const result = checkVersion(flags.version, type)
+    const result = checkVersion(flags.version)
     if (!result.ok) throw new ReleaseError(result.message)
     version = result.value
   } else if (mayPrompt) {
-    const message = type === 'revopush' ? `Target binary version (>= 2.0.0, blank = version in the native project)` : 'Version (blank = project default)'
-    version = checkVersion(await input({ message, validate: versionValidator(type) }), type).value
+    const message = 'Release version (blank = version in the native project)'
+    version = checkVersion(await input({ message, validate: versionValidator })).value
   }
 
   // 6. Description (optional)

@@ -64,7 +64,7 @@ describe('normalizeConfig', () => {
   })
 
   test('defaults: fastlane paths, auto_initialize_commands, environments from env_files', () => {
-    const config = normalizeConfig({ project_name: 'x', env_files: [{ path: '.env.qa', target: 'QA' }] })
+    const config = normalizeConfig({ project_name: 'x', env_files: [{ path: '.env.qa', target: 'QA' }], fastlane: {} })
     expect(config.fastlane.ios.path).toBe('./ios')
     expect(config.fastlane.autoInitialize).toBe(true)
     expect(config.revopush).toBeNull()
@@ -94,6 +94,33 @@ describe('normalizeConfig', () => {
     expect(out).toContain('two entries for target "qa"')
     expect(out).toContain('two entries named "a"')
     expect(out).toContain('lists "qa" twice')
+  })
+
+  describe('revopush xcode_targets', () => {
+    const base = { project_name: 'x', env_files: [{ path: '.env.qa', target: 'qa' }] }
+    const withApp = (app, environments = ['Development', 'Production']) => ({ ...base, revopush: { applications: [app], environments } })
+
+    test('maps environments to Xcode targets, case-insensitively', () => {
+      const config = normalizeConfig(withApp({ name: 'a-ios', target: 'ios', xcode_targets: { Development: 'AppDev', production: 'App' } }))
+      expect(config.revopush.applications[0].xcodeTargets).toEqual({ development: 'AppDev', production: 'App' })
+    })
+
+    test('defaults to none, and an app without it still works', () => {
+      expect(normalizeConfig(withApp({ name: 'a-ios', target: 'ios' })).revopush.applications[0].xcodeTargets).toEqual({})
+    })
+
+    test('is rejected on an Android application', () => {
+      expect(problemsOf(withApp({ name: 'a', target: 'android', xcode_targets: { Development: 'X' } }))).toContain('only applies to an application with target: ios')
+    })
+
+    test('an environment that does not exist is reported, so a typo does not silently do nothing', () => {
+      expect(problemsOf(withApp({ name: 'a-ios', target: 'ios', xcode_targets: { Stagin: 'X' } }))).toContain('xcode_targets.stagin is not one of the environments')
+    })
+
+    test('needs a mapping of non-empty names', () => {
+      expect(problemsOf(withApp({ name: 'a-ios', target: 'ios', xcode_targets: 'AppDev' }))).toContain('must map environment names to Xcode target names')
+      expect(problemsOf(withApp({ name: 'a-ios', target: 'ios', xcode_targets: { Development: '' } }))).toContain('must be a non-empty Xcode target name')
+    })
   })
 
   test('validates pinned lanes', () => {
@@ -158,5 +185,63 @@ describe('runInit', () => {
 
   test('sampleConfig helper stays in sync with the template', () => {
     expect(sampleConfig().environments).toContain('Production')
+  })
+
+  describe('only the tools you choose', () => {
+    const init = async (options, files = {}) => {
+      const root = join(tempDir(), 'my-app')
+      writeFile(join(root, 'package.json'), files['package.json'] ?? JSON.stringify({ name: 'my-app' }))
+      for (const [name, content] of Object.entries(files)) if (name !== 'package.json') writeFile(join(root, name), content)
+      await runInit({ cwd: root, yes: true, ...options })
+      const text = readFileSync(join(root, 'rnmrs.config.yml'), 'utf8')
+      return { text, config: normalizeConfig(YAML.parse(text)) }
+    }
+
+    test('RevoPush only: no fastlane section, and binary releases are not configured', async () => {
+      const { text, config } = await init({ tools: ['revopush'] })
+      expect(text).not.toContain('fastlane:')
+      expect(config.fastlane.enabled).toBe(false)
+      expect(config.revopush.applications.map((a) => a.name)).toEqual(['my-app-android', 'my-app-ios'])
+    })
+
+    test('Fastlane only: no revopush section, and environments come from env_files', async () => {
+      const { text, config } = await init({ tools: ['fastlane'] })
+      expect(text).not.toContain('revopush:')
+      expect(config.revopush).toBeNull()
+      expect(config.fastlane.enabled).toBe(true)
+      expect(config.environments).toEqual(['Development', 'Qa', 'Staging', 'Production'])
+    })
+
+    test('both tools give both sections', async () => {
+      const { config } = await init({ tools: ['fastlane', 'revopush'] })
+      expect(config.fastlane.enabled).toBe(true)
+      expect(config.revopush).not.toBeNull()
+    })
+
+    test('--yes with no choice follows what the project already uses', async () => {
+      const revopushOnly = await init({}, { 'package.json': JSON.stringify({ name: 'a', devDependencies: { '@revopush/react-native-code-push': '1.0.0' } }) })
+      expect(revopushOnly.config.fastlane.enabled).toBe(false)
+      expect(revopushOnly.config.revopush).not.toBeNull()
+
+      const fastlaneOnly = await init({}, { 'ios/fastlane/Fastfile': 'default_platform(:ios)\n' })
+      expect(fastlaneOnly.config.fastlane.enabled).toBe(true)
+      expect(fastlaneOnly.config.revopush).toBeNull()
+    })
+
+    test('when nothing is recognised, --yes writes both so there is something to trim', async () => {
+      const { config } = await init({})
+      expect(config.fastlane.enabled).toBe(true)
+      expect(config.revopush).not.toBeNull()
+    })
+  })
+
+  test('a config with neither tool is rejected with what to add', () => {
+    const base = { project_name: 'x', env_files: [{ path: '.env.qa', target: 'qa' }] }
+    expect(() => normalizeConfig(base)).toThrow(ReleaseError)
+    try {
+      normalizeConfig(base)
+    } catch (error) {
+      expect(error.output).toContain('configure at least one release tool')
+    }
   })
 })

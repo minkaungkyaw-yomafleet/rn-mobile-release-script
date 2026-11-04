@@ -41,10 +41,14 @@ describe('collectAnswers (flags only, as in CI)', () => {
     await expect(ask({ type: 'revopush', app: 'plus-mobile-ios', platform: 'android', env: 'Qa' })).rejects.toThrow(/conflicts/)
   })
 
-  test('revopush versions below 2.0.0 are rejected, valid ones normalized', async () => {
-    await expect(ask({ type: 'revopush', app: 'plus-mobile-ios', env: 'Qa', version: '1.9.0' })).rejects.toThrow(/>= 2.0.0/)
+  test('any valid release version is accepted for revopush and binary, and normalized', async () => {
+    expect((await ask({ type: 'revopush', app: 'plus-mobile-ios', env: 'Qa', version: '0.1.0' })).version).toBe('0.1.0')
     expect((await ask({ type: 'revopush', app: 'plus-mobile-ios', env: 'Qa', version: 'v2.3.0' })).version).toBe('2.3.0')
     expect((await ask({ type: 'binary', platform: 'ios', env: 'Qa', version: '1.0.0' })).version).toBe('1.0.0')
+  })
+
+  test('a version that is not x.y.z is rejected with a clear message', async () => {
+    await expect(ask({ type: 'revopush', app: 'plus-mobile-ios', env: 'Qa', version: '2.1' })).rejects.toThrow(/not a valid version/)
   })
 
   test('missing required choices fail with the flag to pass instead of hanging on a prompt', async () => {
@@ -55,6 +59,31 @@ describe('collectAnswers (flags only, as in CI)', () => {
   test('revopush without a revopush section is explained', async () => {
     const noRevopush = { ...config, revopush: null }
     await expect(collectAnswers(noRevopush, { type: 'revopush', platform: 'ios', env: 'Qa' }, { interactive: false })).rejects.toThrow(/no revopush section/)
+  })
+})
+
+describe('collectAnswers when only one tool is configured', () => {
+  const revopushOnly = { ...config, fastlane: { ...config.fastlane, enabled: false } }
+  const fastlaneOnly = { ...config, revopush: null }
+  const run = (cfg, flags) => collectAnswers(cfg, flags, { interactive: false })
+
+  test('the only configured type is used without -t', async () => {
+    expect((await run(revopushOnly, { app: 'plus-mobile-android', env: 'Qa' })).type).toBe('revopush')
+    expect((await run(fastlaneOnly, { platform: 'ios', env: 'Qa' })).type).toBe('binary')
+  })
+
+  test('asking for the type that is not configured explains how to add it, and offers the other one', async () => {
+    const binary = await run(revopushOnly, { type: 'binary', platform: 'ios', env: 'Qa' }).catch((e) => e)
+    expect(binary.message).toContain('no fastlane section')
+    expect(binary.hint).toContain('-t revopush')
+
+    const revopush = await run(fastlaneOnly, { type: 'revopush', platform: 'ios', env: 'Qa' }).catch((e) => e)
+    expect(revopush.message).toContain('no revopush section')
+    expect(revopush.hint).toContain('-t binary')
+  })
+
+  test('with both configured, the type is still required in a non-interactive session', async () => {
+    await expect(run(config, { platform: 'ios', env: 'Qa' })).rejects.toThrow(/release type is required/)
   })
 })
 
@@ -69,6 +98,12 @@ describe('revopushArgs', () => {
 
   test('omits blank version and description so RevoPush uses its own defaults', () => {
     expect(revopushArgs({ app, platform: 'android', environment: 'Qa', version: '', description: '' })).toEqual(['release-react', 'plus-mobile-android', 'android', '-d', 'Qa'])
+  })
+
+  test('passes the Xcode target to RevoPush only when it must resolve the version', () => {
+    const args = revopushArgs({ app, platform: 'ios', environment: 'Qa', version: '', xcodeTarget: 'AppQa', description: '' })
+    expect(args).toEqual(['release-react', 'plus-mobile-android', 'ios', '-d', 'Qa', '--xt', 'AppQa'])
+    expect(revopushArgs({ app, platform: 'ios', environment: 'Qa', version: '1.5.3', description: '' })).not.toContain('--xt')
   })
 
   test('shell metacharacters in the description stay one inert argument', () => {

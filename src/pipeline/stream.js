@@ -16,6 +16,8 @@ export async function soften(ctx, fn) {
     if (!ctx.flags.dryRun || !(error instanceof ReleaseError)) throw error
     ctx.problems.push(error.message)
     console.log(`${icon.warn} Would stop a real run: ${error.message}`)
+    // The detail (for example which Xcode targets disagree) is what makes the problem fixable.
+    for (const line of (error.output ?? '').trim().split('\n').filter(Boolean).slice(-10)) note(line)
     if (error.hint) note(error.hint)
     return undefined
   }
