@@ -17,10 +17,42 @@ bun run check                  # bun tests + go vet + go tests
 
 With several Go installs, pick one explicitly: `GO=/opt/homebrew/bin/go bun run build:native:current`.
 
-`bun run build:native` cross-compiles macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`. Binaries are build
-artifacts (git-ignored); produce and sign them in CI, and ship them in the package tarball (`prepack` does the build).
+`bun run build:native` cross-compiles macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`. The binaries are
+build artifacts (git-ignored), built and signed by CI and shipped inside the release tarball.
 
-In a target project, add `"release": "rnmrs"` to `package.json`, then:
+## Installing (for developers who use it)
+
+This package is internal and is **not published to npm** (`"private": true` blocks `npm publish`). Each release is a
+signed tarball on the GitHub Releases page. It already contains the compiled binaries, so **Go is not needed**; Bun is.
+
+```bash
+gh release download v0.1.0 --repo <owner>/rn-mobile-release-script --pattern 'rn-mobile-release-script-*'
+shasum -a 256 -c rn-mobile-release-script-0.1.0.tgz.sha256
+cosign verify-blob \
+  --bundle rn-mobile-release-script-0.1.0.tgz.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/<owner>/rn-mobile-release-script/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  rn-mobile-release-script-0.1.0.tgz
+bun add -g ./rn-mobile-release-script-0.1.0.tgz   # puts `rnmrs` on your PATH
+```
+
+The `cosign` step proves the tarball was built by this repository's release workflow and not altered afterwards.
+Replace `<owner>` with the GitHub org or user that owns the repository.
+
+## Releasing a new version (maintainers)
+
+1. Bump `version` in `package.json` and merge to `main`.
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+3. `.github/workflows/release.yml` verifies the tag matches `package.json`, runs `bun audit`, builds all four
+   binaries, runs the tests, packs one tarball, signs that exact file with keyless cosign, and creates the release.
+
+`ci.yml` (tests on Linux and macOS, dependency audit) and `codeql.yml` (SAST for JS and Go) run on every PR; Dependabot
+keeps the SHA-pinned actions current. CodeQL on a private repository needs GitHub Advanced Security, and secret scanning
+is a repository setting to switch on (CI does not scan for secrets).
+
+## Using it in a project
+
+Add `"release": "rnmrs"` to the project's `package.json`, then:
 
 ```bash
 rnmrs --init     # asks first, then writes rnmrs.config.yml (never overwrites without an interactive yes)

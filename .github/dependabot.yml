@@ -1,0 +1,11 @@
+# Keeps the SHA-pinned actions and the Go toolchain declaration current via reviewable PRs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /native
+    schedule:
+      interval: weekly
