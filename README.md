@@ -61,23 +61,30 @@ a provenance attestation for each version; check it with `npm audit signatures`.
 1. Bump `version` in `package.json` and merge to `main`.
 2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
 3. `.github/workflows/release.yml` verifies the tag matches `package.json`, runs `bun audit`, builds all four
-   binaries, runs the tests, packs a tarball, signs it with keyless cosign, creates the GitHub Release, and finally
-   publishes to npm.
+   binaries, runs the tests, packs a tarball, signs it with keyless cosign, creates the GitHub Release (left alone if it
+   already exists), and finally publishes to npm through trusted publishing.
 
 **Publishing to npm is permanent.** npm never lets a version number be reused, and a published version can only be
 withdrawn in narrow cases. Check the version and the changelog before you push the tag. Local `npm publish` is blocked
 on purpose (`prepublishOnly`); publish only through the workflow.
 
-**One-time setup:**
+**Trusted publishing (one-time setup).** CI publishes with npm trusted publishing: npm trusts this exact repository and
+workflow, so there is no stored token and no 2FA prompt, and provenance (a signed link from the package to the commit
+and workflow that built it) is recorded automatically. On npmjs.com open the package, then Settings, Trusted Publisher,
+choose GitHub Actions, and enter:
 
-- An npm account with two-factor authentication, and a repository secret named `NPM_TOKEN` holding an npm access token
-  that is allowed to publish `rnmrs`.
-- The first publish creates the package. After that, you can switch to npm trusted publishing (package Settings, Trusted
-  Publisher, GitHub Actions: this repository and `release.yml`), which needs npm 11.5.1 or newer and Node 22.14 or newer
-  in the workflow, and then delete the `NPM_TOKEN` secret so no long-lived token remains.
-- Provenance (a signed link from the npm package to the commit and workflow that built it) is added automatically
-  because the GitHub repository is public. npm only generates it for public repositories, so the workflow skips it if
-  the repository is ever made private again.
+- Organization or user: `minkaungkyaw-yomafleet`
+- Repository: `rn-mobile-release-script`
+- Workflow filename: `release.yml`
+- Allowed actions: tick **`npm publish`**. If only `npm stage publish` is allowed, the publish from CI is refused.
+
+All fields are case-sensitive and npm does not validate them when you save, so a typo only shows up at the next
+release. The workflow also needs npm 11.5.1 or newer (it uses Node 24 and checks), `id-token: write`, a GitHub-hosted
+runner, and a `repository.url` in `package.json` that matches the repository exactly. If the repository is renamed or
+moved to another owner, update both the trusted publisher and `repository.url`.
+
+After a release has published this way, delete the old `NPM_TOKEN` repository secret. `0.1.0` was published by hand
+(npm refused the token), so the next release must use a new version number, for example `0.1.1`.
 
 `ci.yml` (tests on Linux and macOS, dependency audit) and `codeql.yml` (SAST for JS and Go) run on every PR; Dependabot
 keeps the SHA-pinned actions current. CodeQL is free on public repositories (a private one would need GitHub Advanced

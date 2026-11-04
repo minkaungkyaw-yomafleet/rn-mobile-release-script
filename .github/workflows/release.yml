@@ -4,9 +4,11 @@ name: Release
 # all four targets, packs a tarball, signs it with cosign, attaches it to a GitHub Release, and
 # publishes the package to the public npm registry as `rnmrs`.
 #
-# Needs the repository secret NPM_TOKEN (a granular npm access token allowed to publish `rnmrs`).
-# npm provenance is added automatically while the GitHub repository is public; npm only generates it
-# for public source repositories, so the publish step skips it if the repository is made private.
+# Publishing uses npm trusted publishing: npm trusts this exact repository and workflow file
+# (configured on npmjs.com under the package's Settings, Trusted Publisher), so there is no stored
+# token and no 2FA prompt, and npm records provenance automatically. Requirements: npm 11.5.1 or
+# newer, Node 22.14 or newer, a GitHub-hosted runner, `id-token: write`, and a package.json
+# `repository.url` that matches this repository exactly.
 on:
   push:
     tags: ["v*"]
@@ -19,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub Release
-      id-token: write # keyless cosign signing (short-lived OIDC identity, no stored signing key)
+      id-token: write # keyless cosign signing and npm trusted publishing (short-lived OIDC identity, no stored keys)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,7 +33,7 @@ jobs:
           cache: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24 # ships an npm new enough for trusted publishing; checked below
           registry-url: https://registry.npmjs.org
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
@@ -43,6 +45,17 @@ jobs:
             exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      # Fail now, not after a long build: an older npm cannot do trusted publishing and the publish
+      # step at the very end would fail.
+      - name: npm must be 11.5.1 or newer
+        run: |
+          npm_version="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "${npm_version}" | sort -V | head -n1)" != "11.5.1" ]; then
+            echo "npm ${npm_version} is too old for trusted publishing (needs 11.5.1 or newer)" >&2
+            exit 1
+          fi
+          echo "npm ${npm_version}"
 
       - run: bun install --frozen-lockfile
       - run: bun audit --audit-level=high
@@ -73,24 +86,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            "${TARBALL}" "${TARBALL}.sha256" "${TARBALL}.sigstore.json" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            --verify-tag
+          # Skip if it exists, so re-running a run that failed at the publish step works.
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; leaving it as it is."
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              "${TARBALL}" "${TARBALL}.sha256" "${TARBALL}.sigstore.json" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              --verify-tag
+          fi
 
       # Last, because publishing to npm cannot be undone (a version number is never reused).
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          REPO_PRIVATE: ${{ github.event.repository.private }}
-        run: |
-          # --ignore-scripts: the binaries built above are what gets published, not a second rebuild.
-          flags="--access public --ignore-scripts"
-          if [ "${REPO_PRIVATE}" = "false" ]; then
-            flags="${flags} --provenance"
-          else
-            echo "Repository is private: publishing without provenance (npm only attests public repositories)."
-          fi
-          # shellcheck disable=SC2086 # flags is a deliberate word list
-          npm publish ${flags}
+        # No token: npm exchanges this job's GitHub identity for a short-lived publish credential.
+        # --ignore-scripts: the binaries built above are what gets published, not a second rebuild.
+        run: npm publish --access public --ignore-scripts
