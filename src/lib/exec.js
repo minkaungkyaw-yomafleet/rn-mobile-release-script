@@ -1,40 +1,48 @@
+import { spawn } from 'node:child_process'
+
 // Every process is started from an argv array, never through a shell, so user input
-// (description text, app names) cannot be interpreted as shell syntax.
+// (description text, app names) cannot be interpreted as shell syntax. node:child_process is
+// used so the same code runs on Node, Bun and Deno.
+
+/** Exit code for a process that ended without one: shells report a Ctrl+C as 130. */
+const exitCode = (code, signal) => code ?? (signal === 'SIGINT' ? 130 : 1)
 
 /** Run to completion with output captured. Never throws; a missing binary yields code 127. */
-export async function capture(cmd, args, { cwd, env } = {}) {
-  try {
-    const proc = Bun.spawn([cmd, ...args], {
-      cwd,
-      env: { ...process.env, ...env },
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ])
-    return { code, stdout, stderr }
-  } catch (error) {
-    return { code: 127, stdout: '', stderr: error.message }
-  }
+export function capture(cmd, args, { cwd, env } = {}) {
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (error) {
+      resolve({ code: 127, stdout: '', stderr: error.message })
+      return
+    }
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', (chunk) => (stdout += chunk))
+    child.stderr.setEncoding('utf8').on('data', (chunk) => (stderr += chunk))
+    child.on('error', (error) => resolve({ code: 127, stdout, stderr: error.message }))
+    child.on('close', (code, signal) => resolve({ code: exitCode(code, signal), stdout, stderr }))
+  })
 }
 
 /** Run with the terminal attached, so tools can show progress and ask their own questions. */
-export async function inherit(cmd, args, { cwd, env } = {}) {
-  try {
-    const proc = Bun.spawn([cmd, ...args], {
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: ['inherit', 'inherit', 'inherit'],
+export function inherit(cmd, args, { cwd, env } = {}) {
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: 'inherit' })
+    } catch (error) {
+      console.error(error.message)
+      resolve(127)
+      return
+    }
+    child.on('error', (error) => {
+      console.error(error.message)
+      resolve(127)
     })
-    return await proc.exited
-  } catch (error) {
-    console.error(error.message)
-    return 127
-  }
+    child.on('close', (code, signal) => resolve(exitCode(code, signal)))
+  })
 }
 
 /**

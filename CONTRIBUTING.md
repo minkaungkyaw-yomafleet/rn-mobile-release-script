@@ -17,7 +17,7 @@ exit code 1. Secret values never cross that boundary: the Go result types have n
 
 | Path | Purpose |
 | --- | --- |
-| `bin/rnmrs.js` | Entry point. Starts under Node or Bun and hands over to Bun if needed. |
+| `bin/rnmrs.js` | Entry point and runtime chooser: Bun if installed, else the runtime that started it (Node or Deno). |
 | `src/cli.js` | Flags, config loading, error handling. |
 | `src/config/` | Config schema, loader, template, `--init`, and shortcut commands (`commands.js`, `generate.js`). |
 | `src/prompts/` | Prompts and version rules. |
@@ -70,7 +70,10 @@ cd native && go vet ./... && go test ./...
 ## Conventions
 
 - Plain ESM JavaScript, no TypeScript. Match the surrounding code: naming, comment density, idiom.
-- Start every process from an argument list (`Bun.spawn([cmd, ...args])`), never through a shell.
+- The CLI must run on Bun, Node and Deno, so `src/` and `bin/` use only standard `node:` modules and the dependencies in
+  `package.json`. No `Bun.*` or `Deno.*` APIs outside `src/lib/runtime.js` (which only reads the version). The tests and
+  `scripts/` are developer tooling and run on Bun. CI runs the CLI on Node and Deno (`runtimes` job in `ci.yml`).
+- Start every process from an argument list (`spawn(cmd, args)` in `src/lib/exec.js`), never through a shell.
 - Never print secret values. Report names and counts.
 - No hardcoded credentials, and never disable TLS or authentication checks, even "just for testing".
 - Do not add `ora`: it hangs under Bun 1.4 on a terminal. The spinner is in `src/lib/ui.js`.

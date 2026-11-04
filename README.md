@@ -14,9 +14,10 @@ checks and prompts every time. It replaces the long, per-project release scripts
 ## Requirements
 
 - macOS or Linux (arm64 or x64). iOS releases need macOS.
-- [Bun](https://bun.sh) 1.1 or newer. `rnmrs` runs under Bun and tells you if it is missing. Go is **not** needed: the
-  package contains the compiled helper binaries.
-- Node 18 or newer if you install with npm.
+- A JavaScript runtime: [Node](https://nodejs.org) 18 or newer, [Bun](https://bun.sh) or [Deno](https://deno.com) 2. Any
+  one is enough. If you have more than one, `rnmrs` uses **Bun first**, then the one it was started with (see
+  [Which runtime is used](#which-runtime-is-used)). Go is **not** needed: the package contains the compiled helper
+  binaries.
 - For the release type you use: Fastlane (or Bundler with a Gemfile), CocoaPods for iOS, or the RevoPush CLI
   (log in with `revopush login`).
 
@@ -33,6 +34,17 @@ To pin the version per project (recommended for teams, since the lockfile keeps 
 npm install -D rnmrs      # then add  "release": "rnmrs"  to the project's package.json scripts
 npm run release
 ```
+
+### Which runtime is used
+
+`rnmrs` runs unchanged on Bun, Node and Deno. When you start it, it picks one:
+
+1. **Bun**, if it is installed. It starts fastest.
+2. Otherwise the runtime that started it: **Node** when started by npm or Yarn, or **Deno** when started with
+   `deno run -A`.
+
+`rnmrs --runtime` prints which one is in use. To force one, set `RNMRS_RUNTIME` to `bun`, `node` or `deno`, for example
+`RNMRS_RUNTIME=node rnmrs`. If the runtime you ask for is not installed, `rnmrs` says so instead of falling back.
 
 ## Quick start
 
@@ -77,6 +89,7 @@ Every prompt has a flag, and an answer you pass is not asked again.
 | `--commands` | List the shortcut commands in the config. |
 | `<command>` | Run a shortcut command, for example `rnmrs revo_android_development`. See below. |
 | `-V, --cli-version` | Print the `rnmrs` version. |
+| `--runtime` | Print which JavaScript runtime `rnmrs` is running on (`bun`, `node` or `deno`). |
 
 ```bash
 rnmrs -t revopush -a my-app-android -e Development -d "Hotfix for master branch"
@@ -206,7 +219,7 @@ candidates. Pin the lanes under `fastlane.lanes.<platform>.<environment>` to mak
 
 | Problem | Fix |
 | --- | --- |
-| `rnmrs needs Bun, which was not found on your PATH` | Install Bun from [bun.sh](https://bun.sh), then run `rnmrs` again. |
+| `rnmrs could not find deno on your PATH (RNMRS_RUNTIME=deno)` | You asked for a runtime that is not installed. Install it, or unset `RNMRS_RUNTIME` to use what is available. |
 | `<file> is missing` or `is empty` | Put the env file for that environment in the project. The release stops on purpose rather than build with the wrong one. |
 | `No env_files entry maps to "Production"` | Add `{ path: .env.production, target: production }` to `env_files`. |
 | `This project has no fastlane section` / `no revopush section` | That tool is not in `rnmrs.config.yml`. Add its section, or use the other release type. |

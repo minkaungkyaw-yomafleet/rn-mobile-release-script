@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ReleaseError } from './errors.js'
+import { capture } from './exec.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const EXPECTED_PROTOCOL = 1
@@ -27,12 +28,7 @@ export async function core(args, { cwd } = {}) {
       hint: `Build it with "bun run build:native:current" in ${ROOT} (requires Go).`,
     })
   }
-  const proc = Bun.spawn([bin, ...args], { cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
+  const { code, stdout, stderr } = await capture(bin, args, { cwd })
   if (code !== 0) throw new ReleaseError(stderr.trim() || `rnmrs-core ${args[0]} failed (exit ${code})`)
   try {
     return JSON.parse(stdout)

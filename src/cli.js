@@ -7,6 +7,7 @@ import { runGenerate } from './config/generate.js'
 import { loadConfig } from './config/load.js'
 import { parseToolList } from './config/tools.js'
 import { ReleaseError } from './lib/errors.js'
+import { currentRuntime } from './lib/runtime.js'
 import { runPipeline } from './pipeline/index.js'
 import { collectAnswers } from './prompts/index.js'
 import { printError } from './lib/ui.js'
@@ -30,6 +31,7 @@ export function buildProgram() {
     .option('--no-clean', 'skip cache and build-output cleanup')
     .option('--dry-run', 'run the read-only checks and print what would run, without changing anything')
     .option('-V, --cli-version', 'print the rnmrs version')
+    .option('--runtime', 'print which JavaScript runtime rnmrs is running on (bun, node or deno)')
     .addHelpText(
       'after',
       `
@@ -100,6 +102,7 @@ export async function main(argv) {
 
   try {
     if (flags.cliVersion) console.log(packageVersion())
+    else if (flags.runtime) console.log(`${currentRuntime().name} ${currentRuntime().version}`)
     else if (flags.commands) listCommands()
     else if (flags.generate) await runGenerate({ cwd: process.cwd(), yes: Boolean(flags.yes), dryRun: Boolean(flags.dryRun) })
     else if (flags.init && commandName) throw new ReleaseError('--init does not take a command.', { hint: 'Run "rnmrs --init" on its own, then "rnmrs <command>".' })

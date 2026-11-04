@@ -30,6 +30,51 @@ jobs:
       - run: bun run build:native:current
       - run: bun run check
 
+  # rnmrs runs on Bun, Node and Deno. Bun is installed here only to install dependencies from the
+  # lockfile; RNMRS_RUNTIME forces the runtime under test, so it is what actually runs the CLI.
+  runtimes:
+    name: Runs on ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [node, deno]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20 # the oldest Node line that rnmrs claims to support (engines: >=18)
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        if: matrix.runtime == 'deno'
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - run: bun install --frozen-lockfile
+      - run: bun run build:native:current
+      - name: Run the CLI on ${{ matrix.runtime }}
+        env:
+          RNMRS_RUNTIME: ${{ matrix.runtime }}
+        run: |
+          set -eu
+          cli="${GITHUB_WORKSPACE}/bin/rnmrs.js"
+          # It must really be running on the runtime under test, not just have been asked to.
+          node "${cli}" --runtime | grep -q "^${RNMRS_RUNTIME} "
+          project="$(mktemp -d)"
+          cd "${project}"
+          echo '{"name":"smoke"}' > package.json
+          node "${cli}" --init --yes --with revopush,fastlane
+          node "${cli}" --generate --yes
+          node "${cli}" --commands | grep -q revo_android_development
+      - name: The native helper and process handling work on Node
+        if: matrix.runtime == 'node'
+        run: bun test test/launcher.test.js
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
