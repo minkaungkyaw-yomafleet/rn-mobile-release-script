@@ -39,7 +39,7 @@
     "test:native": "cd native && go vet ./... && go test ./...",
     "check": "bun run test && bun run test:native",
     "prepack": "bun run build:native",
-    "prepublishOnly": "node -e \"if(!process.env.CI){console.error('Publish from CI only: push a v* tag (see README).');process.exit(1)}\""
+    "prepublishOnly": "node -e \"if(!process.env.CI){console.error('Publish from CI only: push a v* tag (see CONTRIBUTING.md).');process.exit(1)}\""
   },
   "dependencies": {
     "@inquirer/prompts": "^7.10.1",

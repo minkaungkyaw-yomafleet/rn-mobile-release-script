@@ -1,168 +1,185 @@
-# rn-mobile-release-script (`rnmrs`)
+# rnmrs
 
-One CLI for React Native releases: Fastlane binary builds and RevoPush OTA updates. It replaces the per-repo
-`fastlane:*`, `*RevoPush` and clean scripts in `plus-mobile` and `better-mobile`.
+Release a React Native app from one command: Fastlane binary builds or RevoPush over-the-air (OTA) updates, with the same
+checks and prompts every time. It replaces the long, per-project release scripts.
 
-> Full setup, usage and troubleshooting docs live in the separate `rn-mobile-release-script-docs` repository, so they
-> are not part of the package developers install. This README is the short reference.
+- **Asks only what it needs.** Release type, platform, application, environment, version and description, with a flag
+  for each so it can run unattended.
+- **Checks before it changes anything.** Toolchain, package manager, the env file for the chosen environment, and
+  Fastlane or RevoPush access.
+- **Cleans and installs reproducibly.** Removes Metro caches and build output, installs from the lockfile without
+  rewriting it, and runs `pod install` for iOS.
+- **Releases with a safety gate.** Binary releases ask before the release step, and Production OTA releases always ask.
 
-- **Bun** runs the CLI (prompts, config, orchestration).
-- **Go** (`native/`, standard library only) does the I/O-heavy work: parallel cleaning, tool probing, Fastfile parsing.
-  The two talk over JSON on stdout, and secret values never cross that boundary.
+## Requirements
 
-## Setup
+- macOS or Linux (arm64 or x64). iOS releases need macOS.
+- [Bun](https://bun.sh) 1.1 or newer. `rnmrs` runs under Bun and tells you if it is missing. Go is **not** needed: the
+  package contains the compiled helper binaries.
+- Node 18 or newer if you install with npm.
+- For the release type you use: Fastlane (or Bundler with a Gemfile), CocoaPods for iOS, or the RevoPush CLI
+  (log in with `revopush login`).
 
-```bash
-bun install
-bun run build:native:current   # builds bin/native/rnmrs-core-<os>-<arch> (needs Go)
-bun run check                  # bun tests + go vet + go tests
-```
-
-With several Go installs, pick one explicitly: `GO=/opt/homebrew/bin/go bun run build:native:current`.
-
-`bun run build:native` cross-compiles macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`. The binaries are
-build artifacts (git-ignored), built by CI and shipped inside the published npm package.
-
-## Installing (for developers who use it)
-
-`rnmrs` is published to the public npm registry. The package already contains the compiled binaries for macOS and Linux
-(arm64 and x64), so **Go is not needed**. **Bun 1.1 or newer is** (`rnmrs` runs under Bun); if it is missing, `rnmrs`
-says so and where to get it.
+## Install
 
 ```bash
 npm install -g rnmrs      # or: bun add -g rnmrs
 rnmrs --cli-version
 ```
 
-To pin the version per project (recommended for teams, since the lockfile keeps everyone on the same one), install it
-as a dev dependency and run it through a script:
+To pin the version per project (recommended for teams, since the lockfile keeps everyone on the same one):
 
 ```bash
 npm install -D rnmrs      # then add  "release": "rnmrs"  to the project's package.json scripts
 npm run release
 ```
 
-**Verifying a release.** Every version is built by CI from a `v*` tag. The same tarball is attached to the
-GitHub Release for that tag, with a checksum and a cosign signature:
+## Quick start
+
+Run these in the root of your React Native project:
 
 ```bash
-cosign verify-blob \
-  --bundle rnmrs-0.1.0.tgz.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/<owner>/rn-mobile-release-script/\.github/workflows/release\.yml@refs/tags/v' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  rnmrs-0.1.0.tgz
+rnmrs --init       # asks first, then writes rnmrs.config.yml (never overwrites without an interactive yes)
+rnmrs --dry-run    # runs the read-only checks and prints what would run, changing nothing
+rnmrs              # the real release, with guided prompts
 ```
 
-Replace `<owner>` with the GitHub account that owns the repository. Because the repository is public, npm also records
-a provenance attestation for each version; check it with `npm audit signatures`.
+Review the generated `rnmrs.config.yml` before the first release (see [Configuration](#configuration)).
 
-## Releasing a new version (maintainers)
+## Usage
 
-1. Bump `version` in `package.json` and merge to `main`.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-3. `.github/workflows/release.yml` verifies the tag matches `package.json`, runs `bun audit`, builds all four
-   binaries, runs the tests, packs a tarball, signs it with keyless cosign, creates the GitHub Release (left alone if it
-   already exists), and finally publishes to npm through trusted publishing.
+### Flags
 
-**Publishing to npm is permanent.** npm never lets a version number be reused, and a published version can only be
-withdrawn in narrow cases. Check the version and the changelog before you push the tag. Local `npm publish` is blocked
-on purpose (`prepublishOnly`); publish only through the workflow.
-
-**Trusted publishing (one-time setup).** CI publishes with npm trusted publishing: npm trusts this exact repository and
-workflow, so there is no stored token and no 2FA prompt, and provenance (a signed link from the package to the commit
-and workflow that built it) is recorded automatically. On npmjs.com open the package, then Settings, Trusted Publisher,
-choose GitHub Actions, and enter:
-
-- Organization or user: `minkaungkyaw-yomafleet`
-- Repository: `rn-mobile-release-script`
-- Workflow filename: `release.yml`
-- Allowed actions: tick **`npm publish`**. If only `npm stage publish` is allowed, the publish from CI is refused.
-
-All fields are case-sensitive and npm does not validate them when you save, so a typo only shows up at the next
-release. The workflow also needs npm 11.5.1 or newer (it uses Node 24 and checks), `id-token: write`, a GitHub-hosted
-runner, and a `repository.url` in `package.json` that matches the repository exactly. If the repository is renamed or
-moved to another owner, update both the trusted publisher and `repository.url`.
-
-After a release has published this way, delete the old `NPM_TOKEN` repository secret. `0.1.0` was published by hand
-(npm refused the token), so the next release must use a new version number, for example `0.1.1`.
-
-`ci.yml` (tests on Linux and macOS, dependency audit) and `codeql.yml` (SAST for JS and Go) run on every PR; Dependabot
-keeps the SHA-pinned actions current. CodeQL is free on public repositories (a private one would need GitHub Advanced
-Security), and secret scanning is a repository setting to switch on (CI does not scan for secrets).
-
-## Using it in a project
-
-Add `"release": "rnmrs"` to the project's `package.json`, then:
-
-```bash
-rnmrs --init     # asks first, then writes rnmrs.config.yml (never overwrites without an interactive yes)
-rnmrs            # guided prompts
-```
-
-## Flags
+Every prompt has a flag, and an answer you pass is not asked again.
 
 | Flag | Meaning |
 | --- | --- |
-| `-t, --type <revopush\|binary>` | release type |
-| `-a, --app <name>` | RevoPush application from the config; also selects the platform |
-| `-p, --platform <android\|ios>` | platform when no app is given (needed for `binary` in CI) |
-| `-e, --env <environment>` | environment from the config, case-insensitive |
-| `-v, --version <x.y.z>` | exact semver; RevoPush needs `>= 2.0.0`; blank uses the native project version |
-| `-d, --description <text>` | release description; omitted when blank |
-| `-y, --yes` | answer confirmations with yes (required for unattended releases) |
-| `--no-clean` | skip cache and build cleanup |
-| `--dry-run` | run the read-only checks and print what would run; exits 1 if a real run would fail |
-
-When `-t`, `-e` and (`-a` or `-p`) are all given, nothing else is prompted (version and description default to blank).
+| `-t, --type <revopush\|binary>` | Release type. |
+| `-a, --app <name>` | RevoPush application from the config. Also selects the platform. |
+| `-p, --platform <android\|ios>` | Platform, when no application is given. Needed for unattended `binary` releases. |
+| `-e, --env <environment>` | Environment from the config. Matching ignores case. |
+| `-v, --version <x.y.z>` | Exact version. RevoPush needs 2.0.0 or newer. Blank uses the version in the native project. |
+| `-d, --description <text>` | Release description. Left out of the command when blank. |
+| `-y, --yes` | Answer confirmations with yes. Required for unattended releases. |
+| `--no-clean` | Skip cache and build-output cleanup. |
+| `--dry-run` | Run the read-only checks and print what would run. Exits 1 if a real run would fail. |
+| `--init` | Create `rnmrs.config.yml` after confirmation. |
+| `-V, --cli-version` | Print the `rnmrs` version. |
 
 ```bash
-rnmrs -t revopush -a plus-mobile-android -e Development -d "Hotfix for master branch"
+rnmrs -t revopush -a my-app-android -e Development -d "Hotfix for master branch"
 rnmrs -t binary -p ios -e Qa --yes
 ```
 
-## Pipeline
+When `-t`, `-e` and either `-a` or `-p` are given, nothing else is prompted (version and description default to blank).
 
-1. **Pre-checks and cleaning**: toolchain probe, package manager (`packageManager` field, then lockfile), the env
-   file mapped to the environment must exist and be non-empty, then Metro caches and build output are removed.
-2. **Dependencies**: reproducible install only (`bun install --frozen-lockfile`, `yarn install --immutable` on Yarn 2+,
-   `--frozen-lockfile` on Yarn 1, `npm ci`); for iOS, `pod install` (via Bundler when there is a Gemfile).
-3. **Release**
-   - `binary`: Fastlane check (`bundle check`), credential-file check, lane resolution, build lane, then
-     `Do you want to proceed with the release? (Y/n)`, then release lane.
-   - `revopush`: `revopush whoami`, then
+### Unattended runs (CI)
+
+Without a terminal, `rnmrs` never waits for input. It fails fast instead: a missing choice stops with the flag to pass,
+and a `binary` release or a `Production` RevoPush release needs `--yes`. Pass credentials as environment variables or CI
+secrets, never on the command line or in the config.
+
+### What a release does
+
+1. **Pre-checks and cleaning:** looks up the tools, detects the package manager (the `packageManager` field, then the
+   lockfile), requires the env file mapped to the environment to exist and not be empty, then removes Metro caches and
+   build output.
+2. **Dependencies:** a reproducible install (`bun install --frozen-lockfile`, `yarn install --immutable` on Yarn 2 or
+   newer, `--frozen-lockfile` on Yarn 1, `npm ci`), then `pod install` for iOS.
+3. **Release:**
+   - `binary`: checks Fastlane and its credential files, picks the build and release lanes, runs the build, asks
+     `Do you want to proceed with the release? (Y/n)`, then runs the release lane.
+   - `revopush`: checks `revopush whoami`, then runs
      `revopush release-react <app> <platform> -d <environment> [-t <version>] [--des "<description>"]`.
-     Production always asks for confirmation.
 
-Every tool is started from an argv array, never through a shell. The mapped env file is exported as `ENVFILE`.
+## Configuration
 
-## Config
+`rnmrs --init` writes a commented template. The keys:
 
-See the template written by `rnmrs --init`. Notes:
+```yaml
+project_name: "My App"
 
-- `env_files` must have an entry for every environment you release to. A missing mapping stops the release, because a
-  build that silently falls back to the wrong `.env` is the failure this tool exists to prevent.
-- `fastlane.auto_initialize_commands: true` reads lanes from each Fastfile (and its `import`s). `false` uses only
-  the lanes pinned under `fastlane.lanes.<platform>.<environment>.{build,release}`.
+env_files:                       # one entry per environment you release to
+  - path: .env.qa
+    target: qa
+  - path: .env.production
+    target: production
 
-### Lane resolution
+revopush:                        # optional; needed for -t revopush
+  applications:
+    - name: my-app-android       # the application name in RevoPush
+      target: android
+    - name: my-app-ios
+      target: ios
+  environments: [Development, Qa, Staging, Production]
 
-Lane names differ per repo (`ios_qa_build` / `ios_qa_release` in plus-mobile, `build_qa` / `distribute_qa` in
-better-mobile), so lanes are classified from their names: build, release (`distribute`, `release`, `upload`, or a bare
-environment name such as `prod`), or both. A build + release pair is preferred over a combined lane.
+fastlane:
+  ios:     { path: "./ios" }
+  android: { path: "./android" }
+  auto_initialize_commands: true # read lanes from each Fastfile
+  # lanes:                       # optional: pin lanes instead of discovery
+  #   android:
+  #     production:
+  #       build: android_production_build
+  #       release: android_production_release
+```
 
-Some environments are genuinely ambiguous (plus-mobile android production: `android_production_release` vs
-`huawei_production_release`; better-mobile ios production: `prod` vs `distribute_prod`). By default nothing is guessed:
-an interactive run asks, a CI run fails and tells you to pin the lane. The tie-break rule lives in
-`src/fastlane/lanePolicy.js` (`pickLane`) for the team to fill in.
+- Every environment you release to needs an `env_files` entry. A missing or empty env file stops the release, because
+  a build that silently falls back to the wrong `.env` is the failure this tool exists to prevent.
+- Keep secrets out of this file. It holds names and paths only and is meant to be committed.
 
-## Development
+### Fastlane lanes
 
-- `src/` JS (`cli.js`, `config/`, `prompts/`, `fastlane/`, `pipeline/`, `lib/`), `native/` Go, `test/` Bun tests.
-- Interactive output uses an in-house spinner (`src/lib/ui.js`): `ora` hangs under Bun 1.4 on a TTY.
-- Tests never touch the real system temp directory (`rnmrs-core clean --temp-dir` is injectable).
+With `auto_initialize_commands: true`, `rnmrs` reads each Fastfile and works out the build and release lanes for the
+environment from their names (for example `ios_qa_build` and `ios_qa_release`, or `build_qa` and `distribute_qa`). A build
+and release pair is preferred over a single lane that does both.
 
-## Not included yet
+When more than one lane fits, `rnmrs` does not guess. A terminal run asks you to choose, and a CI run fails and names the
+candidates. Pin the lanes under `fastlane.lanes.<platform>.<environment>` to make the choice permanent.
 
-- plus-mobile still uses `appcenter codepush` scripts; its RevoPush apps must exist before `-t revopush` works there.
-- The Xcode 27 Release-build guard in plus-mobile's `scripts/ios-preflight.sh` is repo-specific and is not ported.
-- Binary signing and verification (`SHA256SUMS` is produced; signing belongs in CI).
+## Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| `rnmrs needs Bun, which was not found on your PATH` | Install Bun from [bun.sh](https://bun.sh), then run `rnmrs` again. |
+| `<file> is missing` or `is empty` | Put the env file for that environment in the project. The release stops on purpose rather than build with the wrong one. |
+| `No env_files entry maps to "Production"` | Add `{ path: .env.production, target: production }` to `env_files`. |
+| `Several release lanes match ...` | Pin one under `fastlane.lanes` in `rnmrs.config.yml`. |
+| `Not logged in to RevoPush` | Run `revopush login`, then retry. |
+| `This release needs a confirmation but the session is not interactive` | Add `--yes` if you intend an unattended release. |
+| `The native core binary is missing` | Install `rnmrs` from npm. A git checkout does not include the compiled helper. |
+
+For an unexpected error, rerun with `RNMRS_DEBUG=1` to see the stack trace.
+
+## Safety
+
+- Every process starts from an argument list, never through a shell, so a description like `fix"; rm -rf ~` is passed as
+  one literal argument.
+- The env checks report variable names and counts only. Values are never printed.
+- Cleaning only removes a fixed list of build and cache folders, inside the project and the system temp folder, and never
+  follows symbolic links.
+- Releases never rewrite your lockfile, and outward actions need a confirmation or `--yes`.
+
+## Verify a download
+
+Every version is built by CI from a tag, and the same tarball is attached to that tag's GitHub Release with a checksum
+and a cosign signature:
+
+```bash
+cosign verify-blob \
+  --bundle rnmrs-<version>.tgz.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/minkaungkyaw-yomafleet/rn-mobile-release-script/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  rnmrs-<version>.tgz
+```
+
+Versions published from CI also carry an npm provenance attestation: run `npm audit signatures` in a project that
+installed `rnmrs`.
+
+## Contributing
+
+To work on `rnmrs` itself, or to publish a release, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+UNLICENSED. All rights reserved.
