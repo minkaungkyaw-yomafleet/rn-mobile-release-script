@@ -1,0 +1,7 @@
+node_modules/
+# Native binaries are build artifacts: produced by `bun run build:native` (CI / prepack), not committed.
+bin/native/
+*.log
+.DS_Store
+.env
+.env.*
