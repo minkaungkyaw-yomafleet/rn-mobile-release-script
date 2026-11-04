@@ -53,8 +53,8 @@ cosign verify-blob \
   rnmrs-0.1.0.tgz
 ```
 
-Replace `<owner>` with the GitHub account that owns the repository. Once the repository is public, npm also records a
-provenance attestation for each version; check it with `npm audit signatures`.
+Replace `<owner>` with the GitHub account that owns the repository. Because the repository is public, npm also records
+a provenance attestation for each version; check it with `npm audit signatures`.
 
 ## Releasing a new version (maintainers)
 
@@ -76,11 +76,12 @@ on purpose (`prepublishOnly`); publish only through the workflow.
   Publisher, GitHub Actions: this repository and `release.yml`), which needs npm 11.5.1 or newer and Node 22.14 or newer
   in the workflow, and then delete the `NPM_TOKEN` secret so no long-lived token remains.
 - Provenance (a signed link from the npm package to the commit and workflow that built it) is added automatically
-  once the GitHub repository is public. npm only generates it for public repositories.
+  because the GitHub repository is public. npm only generates it for public repositories, so the workflow skips it if
+  the repository is ever made private again.
 
 `ci.yml` (tests on Linux and macOS, dependency audit) and `codeql.yml` (SAST for JS and Go) run on every PR; Dependabot
-keeps the SHA-pinned actions current. CodeQL on a private repository needs GitHub Advanced Security, and secret scanning
-is a repository setting to switch on (CI does not scan for secrets).
+keeps the SHA-pinned actions current. CodeQL is free on public repositories (a private one would need GitHub Advanced
+Security), and secret scanning is a repository setting to switch on (CI does not scan for secrets).
 
 ## Using it in a project
 

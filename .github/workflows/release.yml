@@ -5,8 +5,8 @@ name: Release
 # publishes the package to the public npm registry as `rnmrs`.
 #
 # Needs the repository secret NPM_TOKEN (a granular npm access token allowed to publish `rnmrs`).
-# npm provenance is added automatically once the GitHub repository is public; npm only generates it
-# for public source repositories.
+# npm provenance is added automatically while the GitHub repository is public; npm only generates it
+# for public source repositories, so the publish step skips it if the repository is made private.
 on:
   push:
     tags: ["v*"]
